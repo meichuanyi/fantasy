@@ -41,7 +41,7 @@ func betaRequestOptions(flags []string) []option.RequestOption {
 // buildRequestOptions constructs the common request options shared
 // by Generate and Stream: user-agent, raw tool injection, and any
 // beta API flags.
-func buildRequestOptions(call fantasy.Call, rawTools []json.RawMessage, betaFlags []string) []option.RequestOption {
+func buildRequestOptions(call fantasy.Call, rawTools []json.RawMessage, betaFlags []string, extraBody map[string]any) []option.RequestOption {
 	reqOpts := callUARequestOptions(call)
 	if len(rawTools) > 0 {
 		// Tools are injected as raw JSON rather than via params.Tools
@@ -49,6 +49,11 @@ func buildRequestOptions(call fantasy.Call, rawTools []json.RawMessage, betaFlag
 		// use). If the SDK adds validation that reads params.Tools,
 		// this will need updating.
 		reqOpts = append(reqOpts, option.WithJSONSet("tools", rawTools))
+	}
+	if len(extraBody) > 0 {
+		for k, v := range extraBody {
+			reqOpts = append(reqOpts, option.WithJSONSet(k, v))
+		}
 	}
 	if len(betaFlags) > 0 {
 		reqOpts = append(reqOpts, betaRequestOptions(betaFlags)...)
@@ -329,9 +334,6 @@ func (a languageModel) prepareParams(call fantasy.Call) (
 		adaptive := anthropic.NewThinkingConfigAdaptiveParam()
 		params.Thinking.OfAdaptive = &adaptive
 	case providerOptions.Thinking != nil:
-		if providerOptions.Thinking.BudgetTokens == 0 {
-			return nil, nil, nil, nil, &fantasy.Error{Title: "no budget", Message: "thinking requires budget"}
-		}
 		params.Thinking = anthropic.ThinkingConfigParamOfEnabled(providerOptions.Thinking.BudgetTokens)
 		if call.Temperature != nil {
 			params.Temperature = param.Opt[float64]{}
@@ -1194,7 +1196,11 @@ func (a languageModel) Generate(ctx context.Context, call fantasy.Call) (*fantas
 	if err != nil {
 		return nil, err
 	}
-	reqOpts := buildRequestOptions(call, rawTools, betaFlags)
+	providerOptions := &ProviderOptions{}
+	if v, ok := call.ProviderOptions[Name]; ok {
+		providerOptions, _ = v.(*ProviderOptions)
+	}
+	reqOpts := buildRequestOptions(call, rawTools, betaFlags, providerOptions.ExtraBody)
 
 	response, err := a.client.Messages.New(ctx, *params, reqOpts...)
 	if err != nil {
@@ -1333,7 +1339,11 @@ func (a languageModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.S
 		return nil, err
 	}
 
-	reqOpts := buildRequestOptions(call, rawTools, betaFlags)
+	providerOptions := &ProviderOptions{}
+	if v, ok := call.ProviderOptions[Name]; ok {
+		providerOptions, _ = v.(*ProviderOptions)
+	}
+	reqOpts := buildRequestOptions(call, rawTools, betaFlags, providerOptions.ExtraBody)
 
 	stream := a.client.Messages.NewStreaming(ctx, *params, reqOpts...)
 	acc := anthropic.Message{}
